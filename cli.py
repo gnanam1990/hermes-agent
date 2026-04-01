@@ -7610,10 +7610,23 @@ class HermesCLI:
                     app.invalidate()  # Refresh status line
 
                     try:
-                        self.chat(user_input, images=submit_images or None)
+                        _chat_response = self.chat(user_input, images=submit_images or None)
                     finally:
                         self._agent_running = False
                         self._spinner_text = ""
+
+                        # Only pad short responses — long ones already fill the terminal.
+                        # Fixes: https://github.com/NousResearch/hermes-agent/issues/4421
+                        try:
+                            _terminal_lines = shutil.get_terminal_size().lines
+                            _pad = _terminal_lines // 2
+                            if _pad > 2:
+                                _resp_lines = _chat_response.count("\n") + 1 if isinstance(_chat_response, str) else 1
+                                if _resp_lines < _pad:
+                                    _actual_pad = max(1, _pad - _resp_lines)
+                                    _cprint("\n" * _actual_pad)
+                        except Exception:
+                            pass
 
                         app.invalidate()  # Refresh status line
 
