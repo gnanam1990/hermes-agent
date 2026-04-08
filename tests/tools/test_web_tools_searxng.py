@@ -175,22 +175,45 @@ class TestWebSearchSearxng:
             assert result["data"]["web"][0]["title"] == "Result"
 
 
-# ─── web_extract_tool (SearXNG unsupported) ─────────────────────────────────
+# ─── web_extract_tool (SearXNG falls back to Firecrawl) ─────────────────────
 
 class TestWebExtractSearxng:
-    """Test web_extract_tool graceful handling for SearXNG."""
+    """Test web_extract_tool Firecrawl fallback when SearXNG is selected."""
 
-    def test_extract_returns_unsupported_error(self):
+    def test_extract_falls_back_to_firecrawl(self):
+        mock_firecrawl = MagicMock()
+        mock_firecrawl.scrape.return_value = {
+            "markdown": "# Page Content",
+            "metadata": {"title": "Example Page"},
+        }
+
         with patch("tools.web_tools._get_backend", return_value="searxng"), \
              patch("tools.web_tools.is_safe_url", return_value=True), \
+             patch("tools.web_tools._get_firecrawl_client", return_value=mock_firecrawl), \
              patch("tools.interrupt.is_interrupted", return_value=False):
             from tools.web_tools import web_extract_tool
             result = json.loads(asyncio.get_event_loop().run_until_complete(
                 web_extract_tool(["https://example.com"], use_llm_processing=False)
             ))
             assert "results" in result
-            assert result["results"][0]["error"] is not None
-            assert "does not support" in result["results"][0]["error"]
+            assert result["results"][0]["content"] == "# Page Content"
+            mock_firecrawl.scrape.assert_called_once()
+
+    def test_extract_fallback_handles_firecrawl_error(self):
+        mock_firecrawl = MagicMock()
+        mock_firecrawl.scrape.side_effect = ValueError("No API key")
+
+        with patch("tools.web_tools._get_backend", return_value="searxng"), \
+             patch("tools.web_tools.is_safe_url", return_value=True), \
+             patch("tools.web_tools._get_firecrawl_client", return_value=mock_firecrawl), \
+             patch("tools.interrupt.is_interrupted", return_value=False):
+            from tools.web_tools import web_extract_tool
+            result = json.loads(asyncio.get_event_loop().run_until_complete(
+                web_extract_tool(["https://example.com"], use_llm_processing=False)
+            ))
+            assert "results" in result
+            assert "error" in result["results"][0]
+            assert "failed" in result["results"][0]["error"].lower()
 
 
 # ─── Backend selection ──────────────────────────────────────────────────────

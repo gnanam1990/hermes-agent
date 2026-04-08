@@ -1309,11 +1309,36 @@ async def web_extract_tool(
             elif backend == "exa":
                 results = _exa_extract(safe_urls)
             elif backend == "searxng":
-                # SearXNG is search-only; extraction is not supported.
-                results = [
-                    {"url": u, "title": "", "content": "", "error": "SearXNG does not support content extraction. Use a different backend or web_search_tool instead."}
-                    for u in safe_urls
-                ]
+                # SearXNG is search-only — fall through to Firecrawl for extraction
+                logger.info("SearXNG does not support extraction, falling back to Firecrawl")
+                formats: List[str] = []
+                if format == "markdown":
+                    formats = ["markdown"]
+                elif format == "html":
+                    formats = ["html"]
+
+                results = []
+                for url in safe_urls:
+                    try:
+                        scrape_params = {}
+                        if formats:
+                            scrape_params["formats"] = formats
+                        response = _get_firecrawl_client().scrape(url=url, **scrape_params)
+                        content = ""
+                        if isinstance(response, dict):
+                            content = response.get("markdown") or response.get("html") or response.get("rawHtml", "")
+                        elif hasattr(response, "markdown"):
+                            content = response.markdown or getattr(response, "html", "") or ""
+                        results.append({
+                            "url": url,
+                            "title": getattr(response, "metadata", {}).get("title", "") if hasattr(response, "metadata") else (response.get("metadata", {}) or {}).get("title", ""),
+                            "content": content,
+                            "raw_content": content,
+                            "metadata": {"sourceURL": url, "title": ""},
+                        })
+                    except Exception as e:
+                        logger.warning("Firecrawl fallback extraction failed for %s: %s", url, e)
+                        results.append({"url": url, "title": "", "content": "", "error": f"Extraction failed: {e}"})
             elif backend == "tavily":
                 logger.info("Tavily extract: %d URL(s)", len(safe_urls))
                 raw = _tavily_request("extract", {
